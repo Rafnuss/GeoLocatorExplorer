@@ -2,8 +2,8 @@
   <div class="d-flex vh-100">
     <!-- Left Sidebar -->
     <div class="bg-dark text-white p-4" style="width: 32rem">
-      <h2 class="h4 fw-bold mb-4">Records</h2>
-      <div v-if="loading_records">Loading records...</div>
+      <h2 class="h4 fw-bold mb-4">GeoLocator DP</h2>
+      <div v-if="loading_records">Loading datapackages...</div>
       <div v-else>
         <div class="list-group">
           <!-- List of records will be rendered here dynamically -->
@@ -282,7 +282,7 @@ export default {
           tb.line({
             geometry: coordinates_tag,
             color: color,
-            width: 10,
+            width: 6,
             opacity: 1,
           })
         );
