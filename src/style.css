@@ -4,3 +4,12 @@
 body {
   margin: 0;
 }
+.orcid-logo {
+  width: 16px;
+  vertical-align: baseline;
+  margin-left: 4px;
+  transition: opacity 0.2s;
+}
+.orcid-logo:hover {
+  opacity: 0.7;
+}

@@ -1,7 +1,7 @@
 <template>
   <div class="d-flex vh-100">
     <!-- Left Sidebar -->
-    <div class="bg-dark text-white p-4" style="width: 32rem">
+    <div class="bg-dark text-white p-4 overflow-auto" style="width: 32rem">
       <h2 class="h4 fw-bold mb-4">GeoLocator DP</h2>
       <div v-if="loading_records">Loading datapackages...</div>
       <div v-else>
@@ -46,10 +46,39 @@
                 <i class="bi bi-check-circle text-success"></i>
               </div>
             </div>
-            <p class="mb-1">Some placeholder content in a paragraph.</p>
-            <small>And some small print.</small>
+            <p class="mb-1">
+              <span v-for="(creator, index) in record.creators" :key="creator.orcid || index">
+                <span :title="creator.affiliation || ''">{{ creator.name }}</span>
+
+                <!-- ORCID link with logo -->
+                <a
+                  v-if="creator.orcid"
+                  :href="'https://orcid.org/' + creator.orcid"
+                  target="_blank"
+                  title="View ORCID"
+                >
+                  <img src="/ORCID_iD.svg" alt="ORCID" class="orcid-logo" />
+                </a>
+
+                <!-- Add comma between authors -->
+                <span v-if="index < record.creators.length - 1">, </span>
+              </span>
+            </p>
+            <!--<small v-html="record.description"></small>-->
+
+            <small class="text-muted mt-2">
+              <i class="bi bi-calendar-range"></i>
+              {{ record.temporal.start }} – {{ record.temporal.end }}
+            </small>
+            <span v-for="tax in record.taxonomic" :key="tax"> </span>
+            <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+              <i class="bi bi-feather"></i>
+              <span v-for="tax in record.taxonomic" :key="tax">
+                <span class="badge bg-secondary rounded-pill">{{ tax }}</span>
+              </span>
+            </div>
             <p>
-              <a :href="'https://doi.org/' + record.doi">
+              <a :href="'https://doi.org/' + record.doi" target="_blank">
                 <img :src="'https://zenodo.org/badge/DOI/' + record.doi + '.svg'" alt="DOI" />
               </a>
             </p>
@@ -70,6 +99,7 @@
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Papa from "papaparse"; // Import PapaParse
+import pako from "pako";
 import { Threebox } from "threebox-plugin";
 import chroma from "chroma-js";
 
@@ -161,48 +191,102 @@ export default {
           throw new Error(`Error fetching records: ${response.statusText}`);
         }
         const data = await response.json();
-        this.records = data.hits.hits.map((record) => ({
-          title: record.metadata.title,
-          files: record.files.reduce((acc, f) => {
-            const {
-              key,
-              links: { self },
-            } = f;
-            acc[key] = self; // Use the `key` as the property name
-            return acc;
-          }, {}),
-          doi: record.doi,
-          creators: record.metadata.creators,
-          description: record.metadata.description,
-          tags: null,
-          staps: null,
-          paths: null,
-          pressurepaths: null,
-          loading: 0,
-        }));
+        this.records = await Promise.all(
+          data.hits.hits.map(async (record) => {
+            let files = record.files.reduce((acc, f) => {
+              const {
+                key,
+                links: { self },
+              } = f;
+              acc[key] = self;
+              return acc;
+            }, {});
+
+            if (!files["datapackage.json"]) {
+              console.warn("No datapackage.json found for record:", record.metadata.title);
+              return null;
+            }
+
+            try {
+              const response = await fetch(files["datapackage.json"]);
+              const datapackage = await response.json();
+              record = { ...record, ...datapackage };
+
+              let description = "";
+              if (record.metadata.description) {
+                description = record.metadata.description;
+              }
+              const MAX_LENGTH = 150;
+              if (description.length > MAX_LENGTH) {
+                description = description.substring(0, MAX_LENGTH).trim() + "...";
+              }
+              record.creators = record.metadata.creators;
+              record.description = description;
+
+              record.taxonomic = Array.isArray(record.taxonomic)
+                ? record.taxonomic
+                : [record.taxonomic];
+
+              record.doi = record.doi;
+              record.tags = null;
+              record.staps = null;
+              record.paths = null;
+              record.pressurepaths = null;
+              record.loading = 0;
+              record.files = files;
+
+              console.log(record.taxonomic);
+              return record;
+            } catch (error) {
+              console.error("Error loading datapackage.json:", error);
+              return null;
+            }
+          })
+        );
       } catch (err) {
         console.log(err);
       } finally {
         this.loading_records = false;
+        this.plotSpatial();
       }
     },
     loadDataRecord(index) {
       this.records[index].loading = 1;
       // List of CSV files we need to fetch and parse
-      // const csvFiles = ["tags.csv", "staps.csv", "paths.csv"];
-      const csvFiles = ["pressurepaths.csv"];
+      // const csvFiles = ["tags", "staps", "paths"];
+      const csvFiles = ["pressurepaths"];
 
       // Helper function to fetch and parse a CSV file
       const fetchAndParseCSV = (filePath, fileKey) => {
         return new Promise((resolve, reject) => {
+          // Check if the file path includes ".csv.gz" (not just ends with)
+          const isGzipped = filePath.includes(".csv.gz");
           fetch(filePath)
             .then((response) => {
               if (!response.ok) {
                 throw new Error(`Network response was not ok for ${filePath}`);
               }
-              return response.text(); // Parse the response as text
+              // If the file is gzipped, return the binary data (arrayBuffer)
+              if (isGzipped) {
+                return response.arrayBuffer();
+              } else {
+                // Otherwise, return the file as plain text (for regular .csv)
+                return response.text();
+              }
             })
-            .then((csvText) => {
+            .then((data) => {
+              let csvText;
+
+              // If data is in binary (arrayBuffer), decompress using pako
+              if (isGzipped) {
+                const decompressedData = pako.ungzip(new Uint8Array(data), { to: "string" });
+                csvText = decompressedData;
+              } else {
+                // If it's not gzipped, use the data as is (CSV text)
+                csvText = data;
+              }
+
+              //console.log(csvText);
               // Parse the CSV text using PapaParse
               Papa.parse(csvText, {
                 complete: (result) => {
@@ -220,17 +304,19 @@ export default {
       };
 
       // Create an array of promises for fetching and parsing all CSV files
-      const promises = csvFiles.map((file) => {
-        const fileKey = file.split(".")[0];
-        const filePath = this.records[index].files[file]; // Get the file path from the record
+      const promises = csvFiles.map((fileKey) => {
+        const fileName = Object.keys(this.records[index].files).find((key) => {
+          return key.includes(fileKey);
+        });
+        const filePath = this.records[index].files[fileName]; // Get the file path from the record
         if (this.records[index].loading == 2) {
           console.error(`Record ${fileKey} already loaded.`);
           return Promise.resolve();
         } else if (filePath) {
           return fetchAndParseCSV(filePath, fileKey); // Call the helper function for each file
         } else {
-          console.error(`File ${file} not found in the record.`);
-          return Promise.reject(new Error(`File ${file} not found in the record.`)); // Reject if file is missing
+          console.error(`File ${fileKey} not found in the record.`);
+          return Promise.reject(new Error(`File ${fileKey} not found in the record.`)); // Reject if file is missing
         }
       });
 
@@ -299,6 +385,26 @@ export default {
         render: (gl, matrix) => {
           tb.update();
         },
+      });
+    },
+    plotSpatial() {
+      this.records.forEach((record) => {
+        if (record.spatial) {
+          this.map.addSource("polygon-" + record.id, {
+            type: "geojson",
+            data: record.spatial,
+          });
+
+          this.map.addLayer({
+            id: "polygon-outline-" + record.id,
+            type: "line",
+            source: "polygon-" + record.id,
+            paint: {
+              "line-color": "#000",
+              "line-width": 2,
+            },
+          });
+        }
       });
     },
   },
