@@ -2,7 +2,20 @@
   <div class="d-flex vh-100">
     <!-- Left Sidebar -->
     <div class="bg-dark text-white p-4 overflow-auto" style="width: 32rem">
-      <h2 class="h4 fw-bold mb-4">GeoLocator DP</h2>
+      <div class="d-flex align-items-center mb-2">
+        <img
+          src="/logo.svg"
+          alt="GeoLocator Logo"
+          style="max-width: 40px"
+          class="bg-white rounded-circle p-1 me-2"
+        />
+        <h2 class="h4 fw-bold mb-0">GeoLocatorExplorer</h2>
+      </div>
+      <p style="color: #f8f9fa">
+        Visualize the pressurepath (3D trajectory on an hourly basis) constructed from pressure
+        sensor for all datapackage. Simply click on <i class="bi bi-cloud-download"></i>, and
+        navigate the map in 3D.
+      </p>
       <div v-if="loading_records">Loading datapackages...</div>
       <div v-else>
         <div class="list-group">
@@ -10,10 +23,7 @@
           <div
             v-for="(record, index) in records"
             :key="record.id"
-            :class="[
-              'list-group-item list-group-item-action rounded mb-2',
-              record.loading ? 'disabled bg-secondary text-light' : 'hover',
-            ]"
+            class="list-group-item list-group-item-action rounded mb-2 hover"
           >
             <div class="d-flex w-100 justify-content-between">
               <h5 class="mb-1">{{ record.title }}</h5>
@@ -66,12 +76,12 @@
             </p>
             <!--<small v-html="record.description"></small>-->
 
-            <small class="text-muted mt-2">
+            <small class="text-muted">
               <i class="bi bi-calendar-range"></i>
               {{ record.temporal.start }} – {{ record.temporal.end }}
             </small>
             <span v-for="tax in record.taxonomic" :key="tax"> </span>
-            <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
               <i class="bi bi-feather"></i>
               <span v-for="tax in record.taxonomic" :key="tax">
                 <span class="badge bg-secondary rounded-pill">{{ tax }}</span>
@@ -108,7 +118,7 @@ export default {
     return {
       records: [], // List of records fetched from the Zenodo API
       map: null,
-      exaggeration: 10,
+      exaggeration: 12,
       loading_records: true,
     };
   },
@@ -341,7 +351,11 @@ export default {
           const { lon, lat, altitude, tag_id } = row;
           if (!isNaN(lon) && !isNaN(lat) && !isNaN(altitude) && tag_id) {
             // Convert to [lon, lat, alt] with altitude adjusted
-            const coordinate = [Number(lon), Number(lat), Number(altitude) * this.exaggeration];
+            const coordinate = [
+              Number(lon),
+              Number(lat),
+              Math.round(Number(altitude) * this.exaggeration),
+            ];
 
             // Initialize the array if tag_id is encountered for the first time
             if (!acc[tag_id]) {
@@ -353,6 +367,8 @@ export default {
         }
         return acc;
       }, {});
+
+      console.log(coordinates);
 
       const tb = new Threebox(this.map, this.map.getCanvas().getContext("webgl"), {
         defaultLights: true,
@@ -390,17 +406,20 @@ export default {
     plotSpatial() {
       this.records.forEach((record) => {
         if (record.spatial) {
-          this.map.addSource("polygon-" + record.id, {
+          const sourceId = "polygon-" + record.id;
+          const layerId = "polygon-outline-" + record.id;
+
+          this.map.addSource(sourceId, {
             type: "geojson",
             data: record.spatial,
           });
 
           this.map.addLayer({
-            id: "polygon-outline-" + record.id,
+            id: layerId,
             type: "line",
-            source: "polygon-" + record.id,
+            source: sourceId,
             paint: {
-              "line-color": "#000",
+              "line-color": "#FFF",
               "line-width": 2,
             },
           });
